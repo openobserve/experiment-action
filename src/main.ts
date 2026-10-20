@@ -11,6 +11,7 @@ import { O2Client } from "./o2/client.js";
 import { runAction } from "./run.js";
 
 const pullRequest = context.payload.pull_request;
+const headSha: unknown = pullRequest?.head?.sha;
 const workspace = process.env.GITHUB_WORKSPACE ?? process.cwd();
 
 try {
@@ -24,7 +25,12 @@ try {
       isForkPullRequest:
         pullRequest !== undefined && pullRequest.head?.repo?.full_name !== pullRequest.base?.repo?.full_name,
     },
-    ci: readCiContext(process.env, pullRequest?.number ?? null),
+    ci: readCiContext(
+      process.env,
+      pullRequest
+        ? { number: pullRequest.number, headSha: typeof headSha === "string" ? headSha : null }
+        : null,
+    ),
     createApi: (inputs) =>
       httpApi(
         new O2Client({

@@ -7,8 +7,42 @@
  * and on cost or latency only when the user names them.
  */
 
-import type { Comparison, ComparisonDimension } from "./o2/types.js";
+import type { Comparison, ComparisonDimension, ScoreConfig, Scorer } from "./o2/types.js";
 import { ActionError } from "./verdict.js";
+
+/**
+ * Run mode refuses an unknown `dimensions` name before it creates the
+ * experiment, so a typo does not cost a whole run. The dimensions of a new
+ * experiment are latency, cost, and the score config of each pinned scorer.
+ * When the score config of a scorer cannot be named, the full list is unknown
+ * and nothing is refused here. `selectGatingDimensions` checks every name
+ * again after compare, including whether it can gate.
+ */
+export function checkDimensionNames(
+  names: string[],
+  scorerIds: string[],
+  scorers: Scorer[],
+  scoreConfigs: ScoreConfig[],
+): void {
+  const configNames: Record<string, string> = Object.fromEntries(
+    scoreConfigs.map((config) => [config.entityId, config.name]),
+  );
+  const scoreNames: string[] = [];
+  for (const id of scorerIds) {
+    const configId = scorers.find((scorer) => scorer.entityId === id)?.producesScoreConfigId;
+    const name = configId ? configNames[configId] : undefined;
+    if (name === undefined) return;
+    if (!scoreNames.includes(name)) scoreNames.push(name);
+  }
+  const available = [...scoreNames, "latency_ms", "cost"];
+  const unknown = names.filter((name) => !available.includes(name));
+  if (unknown.length > 0) {
+    throw new ActionError(
+      "setup_failed",
+      `Unknown dimension(s): ${unknown.join(", ")}. Available: ${available.join(", ")}.`,
+    );
+  }
+}
 
 /** Every dimension of the comparison. The top level lists only eligible ones; rows also carry descriptive ones. */
 export function allDimensions(comparison: Comparison): ComparisonDimension[] {

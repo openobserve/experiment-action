@@ -106,7 +106,10 @@ export function fakeApi(overrides: Partial<O2Api> = {}): O2Api & { calls: string
     };
   const api: O2Api = {
     listDatasets: async () => [{ id: "ds_1", name: "rag-qa-golden", globalVersion: 12 }],
-    listScorers: async () => [{ entityId: "sc_correct", name: "answer_correctness", version: 3 }],
+    listScorers: async () => [
+      { entityId: "sc_correct", name: "answer_correctness", version: 3, producesScoreConfigId: "cfg_correct" },
+    ],
+    listScoreConfigs: async () => [{ entityId: "cfg_correct", name: "answer_correctness" }],
     listProviders: async () => [{ id: "prov_1", name: "openai-prod" }],
     resolvePrompt: async () => ({ prompt: { entityId: "pr_1", name: "support-answer" }, version: { version: 7 } }),
     listExperiments: async () => [baselineExperiment],

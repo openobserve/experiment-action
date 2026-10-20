@@ -65,7 +65,7 @@ export function renderReport(context: ReportContext): string {
   }
 
   if (comparison) {
-    if (comparison.dimensions.length > 0) lines.push(...dimensionTable(comparison.dimensions), "");
+    if (comparison.dimensions.length > 0) lines.push(...dimensionTable(comparison), "");
     const topLevel = new Set(comparison.dimensions.map((dimension) => dimension.id));
     const descriptive = allDimensions(comparison).filter(
       (dimension) => !topLevel.has(dimension.id) && !dimension.canAffectOutcome,
@@ -109,12 +109,25 @@ export function renderReport(context: ReportContext): string {
   return `${lines.join("\n").trimEnd()}\n`;
 }
 
-function dimensionTable(dimensions: ComparisonDimension[]): string[] {
-  const rows = dimensions.map((dimension) => {
+/**
+ * The Δ column is the change of the mean; the last column counts rows. The
+ * gate counts rows, so a mean that improved can sit next to regressed rows.
+ */
+function dimensionTable(comparison: Comparison): string[] {
+  const rowCounts: Record<string, { regressed: number; improved: number }> = {};
+  for (const row of comparison.rows) {
+    for (const dimension of row.dimensions) {
+      if (!dimension.gating) continue;
+      const counts = (rowCounts[dimension.id] ??= { regressed: 0, improved: 0 });
+      if (dimension.assignment === "regressed") counts.regressed += 1;
+      if (dimension.assignment === "improved") counts.improved += 1;
+    }
+  }
+  const rows = comparison.dimensions.map((dimension) => {
     const name = dimension.kind === "cost" ? "cost ($)" : dimension.kind === "latency" ? "latency (ms)" : dimensionLabel(dimension);
-    return `| ${cell(name)} | ${value(dimension, "baseline")} | ${value(dimension, "candidate")} | ${signed(dimension.delta)} | ${status(dimension)} |`;
+    return `| ${cell(name)} | ${value(dimension, "baseline")} | ${value(dimension, "candidate")} | ${signed(dimension.delta)} | ${status(dimension, rowCounts[dimension.id])} |`;
   });
-  return ["| Dimension | Baseline | Candidate | Δ | |", "|---|---|---|---|---|", ...rows];
+  return ["| Dimension | Baseline | Candidate | Δ mean | Rows |", "|---|---|---|---|---|", ...rows];
 }
 
 function topRegressions(comparison: Comparison): string[] {
@@ -150,22 +163,21 @@ function topRegressions(comparison: Comparison): string[] {
   ];
 }
 
-function status(dimension: ComparisonDimension): string {
+function status(dimension: ComparisonDimension, rows: { regressed: number; improved: number } | undefined): string {
   if (!dimension.gating) return dimension.canAffectOutcome ? "not selected" : "not gated";
   switch (dimension.assignment) {
-    case "regressed":
-      return "❌";
-    case "improved":
-      return "✅";
-    case "unchanged":
-      return "=";
     case "baseline_only":
       return "baseline only";
     case "candidate_only":
       return "candidate only";
-    default:
+    case "descriptive":
+    case "unavailable":
       return "n/a";
   }
+  const parts: string[] = [];
+  if (rows && rows.regressed > 0) parts.push(`❌ ${rows.regressed} regressed`);
+  if (rows && rows.improved > 0) parts.push(`✅ ${rows.improved} improved`);
+  return parts.length > 0 ? parts.join(" · ") : "=";
 }
 
 function value(dimension: ComparisonDimension, side: "baseline" | "candidate"): string {
@@ -181,8 +193,10 @@ function number(input: number | null | undefined): string {
 
 function signed(input: number | null | undefined): string {
   if (input === null || input === undefined) return "—";
+  // Round first: a tiny negative delta must not print as "−0".
   const text = number(Math.abs(input));
-  return input > 0 ? `+${text}` : input < 0 ? `−${text}` : text;
+  if (text === "0") return text;
+  return input > 0 ? `+${text}` : `−${text}`;
 }
 
 /** Text safe inside a table cell or a heading. */

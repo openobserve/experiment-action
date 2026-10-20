@@ -27,8 +27,16 @@ export const ScorerSchema = z.object({
   entityId: z.string(),
   name: z.string(),
   version: z.number(),
+  /** Entity id of the score config that the scorer writes. */
+  producesScoreConfigId: z.string().nullish(),
 });
 export const ScorerListSchema = listOf(ScorerSchema);
+export type Scorer = z.infer<typeof ScorerSchema>;
+
+/** A score config names a dimension of the comparison. */
+export const ScoreConfigSchema = z.object({ entityId: z.string(), name: z.string() });
+export const ScoreConfigListSchema = listOf(ScoreConfigSchema);
+export type ScoreConfig = z.infer<typeof ScoreConfigSchema>;
 
 export const ProviderListSchema = listOf(z.object({ id: z.string(), name: z.string() }));
 

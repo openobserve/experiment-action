@@ -8,6 +8,7 @@
  * actionable finding.
  */
 
+import { dimensionLabel } from "./dimensions.js";
 import type { Comparison, ExperimentView } from "./o2/types.js";
 
 export type VerdictValue = "pass" | "regressed" | "error";
@@ -115,9 +116,24 @@ export function decideFromComparison(comparison: Comparison, allowInconclusive: 
   }
   const counts = comparison.counts;
   if (counts.commonRows === 0 || counts.inconclusive === counts.commonRows) {
+    // The usual cause: a scorer or scorer version differs from the baseline,
+    // so each gating dimension has values on one side only.
+    const oneSided = comparison.dimensions
+      .filter(
+        (dimension) =>
+          dimension.gating && (dimension.assignment === "baseline_only" || dimension.assignment === "candidate_only"),
+      )
+      .map(
+        (dimension) =>
+          `${dimensionLabel(dimension)} (${dimension.assignment === "baseline_only" ? "baseline only" : "candidate only"})`,
+      );
+    const cause =
+      oneSided.length > 0
+        ? ` These gating dimensions have values on one side only: ${oneSided.join(", ")}. Use the scorers and scorer versions of the baseline.`
+        : "";
     return errorVerdict(
       "nothing_compared",
-      `No row was compared: ${counts.commonRows} common rows, ${counts.inconclusive} inconclusive.`,
+      `No row was compared: ${counts.commonRows} common rows, ${counts.inconclusive} inconclusive.${cause}`,
     );
   }
   if (counts.regressed > 0) {

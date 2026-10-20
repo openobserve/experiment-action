@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { readCiContext } from "../src/ci.js";
 import type { O2Api } from "../src/o2/api.js";
 import { O2Client, O2HttpError } from "../src/o2/client.js";
 import { ComparisonSchema } from "../src/o2/types.js";
@@ -137,6 +138,7 @@ describe("runAction, run mode", () => {
     function selectionApi(dimensions = [platformScore, latency]) {
       const requested: (string[] | undefined)[] = [];
       const api = fakeApi({
+        listScoreConfigs: async () => [{ entityId: "cfg_correct", name: "quality" }],
         compare: async (params) => {
           requested.push(params.outcomeDimensions);
           return comparison({
@@ -166,8 +168,18 @@ describe("runAction, run mode", () => {
       await run({ ...RUN_INPUTS, dimensions: "quality" }, api);
       expect(requested).toEqual([undefined, ["latency"], undefined, ["score:q"]]);
 
-      const unknown = await run({ ...RUN_INPUTS, dimensions: "tone" }, selectionApi().api);
-      expect(unknown.verdict.message).toMatch(/Unknown dimension\(s\): tone\. Available: quality, latency_ms/);
+      const unknownApi = selectionApi().api;
+      const unknown = await run({ ...RUN_INPUTS, dimensions: "tone" }, unknownApi);
+      expect(unknown.verdict.message).toMatch(/Unknown dimension\(s\): tone\. Available: quality, latency_ms, cost/);
+      // Refused before the experiment is created and paid for.
+      expect(unknownApi.calls).not.toContain("createExperiment");
+    });
+
+    it("leaves the name check to compare when a scorer's score config cannot be named", async () => {
+      const api = fakeApi({ listScoreConfigs: async () => [] });
+      const { verdict } = await run({ ...RUN_INPUTS, dimensions: "tone" }, api);
+      expect(api.calls).toContain("createExperiment");
+      expect(verdict.message).toMatch(/Unknown dimension\(s\): tone/);
     });
 
     it("reports no_gating_dimension when only descriptive scores and latency exist", async () => {
@@ -205,6 +217,44 @@ describe("runAction, run mode", () => {
     expect(io.failed).toBeNull();
     expect(io.warnings).toEqual([expect.stringMatching(/pull-requests: write/)]);
     expect(io.summary).toContain("✅ pass");
+  });
+});
+
+describe("runAction, invalid inputs", () => {
+  it("sets every output and writes the summary, without calling OpenObserve", async () => {
+    const api = fakeApi();
+    const { verdict, io } = await run({ ...RUN_INPUTS, trial_count: "0" }, api);
+    expect(verdict.reason).toBe("invalid_inputs");
+    expect(api.calls).toEqual([]);
+    expect(io.outputs).toEqual({
+      experiment_id: "",
+      experiment_url: "",
+      compare_url: "",
+      baseline_id: "",
+      verdict: "error",
+      error_reason: "invalid_inputs",
+      regressed: "",
+      improved: "",
+      unchanged: "",
+      inconclusive: "",
+      new: "",
+      missing: "",
+    });
+    expect(io.summary).toMatch(/error: invalid_inputs[\s\S]*trial_count/);
+    expect(io.comments).toEqual([]);
+    expect(io.failed).toMatch(/trial_count/);
+  });
+});
+
+describe("readCiContext", () => {
+  const env = { GITHUB_SHA: "merge0000000000", GITHUB_REF_NAME: "142/merge" };
+
+  it("names a pull request run after the PR head, not the temporary merge commit", () => {
+    expect(readCiContext(env, { number: 142, headSha: "head1111111111" }).sha).toBe("head1111111111");
+  });
+
+  it("uses GITHUB_SHA outside pull requests", () => {
+    expect(readCiContext(env, null).sha).toBe("merge0000000000");
   });
 });
 

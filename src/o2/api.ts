@@ -12,18 +12,22 @@ import {
   ExperimentListSchema,
   ProviderListSchema,
   ResolvedPromptSchema,
+  ScoreConfigListSchema,
   ScorerListSchema,
   type Comparison,
   type CreateExperimentRequest,
   type Dataset,
   type ExperimentDetail,
   type ExperimentView,
+  type ScoreConfig,
+  type Scorer,
 } from "./types.js";
 import type { z } from "zod";
 
 export interface O2Api {
   listDatasets(): Promise<Dataset[]>;
-  listScorers(): Promise<z.infer<typeof ScorerListSchema>["list"]>;
+  listScorers(): Promise<Scorer[]>;
+  listScoreConfigs(): Promise<ScoreConfig[]>;
   listProviders(): Promise<z.infer<typeof ProviderListSchema>["list"]>;
   resolvePrompt(name: string, version: number): Promise<z.infer<typeof ResolvedPromptSchema>>;
   listExperiments(datasetId: string): Promise<ExperimentView[]>;
@@ -41,6 +45,7 @@ export function httpApi(client: O2Client): O2Api {
   return {
     listDatasets: async () => (await client.request(DatasetListSchema, "GET", "/datasets")).list,
     listScorers: async () => (await client.request(ScorerListSchema, "GET", "/scorers")).list,
+    listScoreConfigs: async () => (await client.request(ScoreConfigListSchema, "GET", "/score_configs")).list,
     listProviders: async () => (await client.request(ProviderListSchema, "GET", "/providers")).list,
     resolvePrompt: (name, version) =>
       client.request(ResolvedPromptSchema, "GET", "/prompts/resolve", {

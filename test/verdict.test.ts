@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { ComparisonSchema } from "../src/o2/types.js";
+import { ComparisonSchema, type Comparison } from "../src/o2/types.js";
 import { renderReport } from "../src/render.js";
 import { decideBeforeCompare, decideFromComparison } from "../src/verdict.js";
 import { comparison, dimension, experiment } from "./fixtures.js";
@@ -61,6 +61,19 @@ describe("decideFromComparison", () => {
   it("is an error when every common row is inconclusive", () => {
     const result = comparison({ counts: { ...counts, unchanged: 0, inconclusive: 10 } });
     expect(decideFromComparison(result, true).reason).toBe("nothing_compared");
+  });
+
+  it("names the gating dimensions that exist on one side only", () => {
+    const result = comparison({
+      counts: { ...counts, unchanged: 0, inconclusive: 10 },
+      dimensions: [
+        dimension({ id: "score:p", scoreConfigName: "policy", assignment: "baseline_only" }),
+        dimension({ id: "score:h", scoreConfigName: "helpfulness", assignment: "candidate_only" }),
+      ],
+    });
+    expect(decideFromComparison(result, false).message).toMatch(
+      /one side only: policy \(baseline only\), helpfulness \(candidate only\)/,
+    );
   });
 
   it("blocks inconclusive rows unless allowed, but a regression outranks them", () => {
@@ -128,5 +141,45 @@ describe("renderReport", () => {
     });
     expect(markdown).toContain("a\\|b");
     expect(markdown).toContain("| x\\|y |");
+  });
+
+  function render(result: Comparison, verdict: "pass" | "regressed" = "pass") {
+    return renderReport({
+      commentKey: "k",
+      experimentName: "pr-1",
+      verdict: { verdict, reason: null, message: "" },
+      experimentUrl: null,
+      compareUrl: null,
+      baseline: null,
+      dataset: null,
+      threshold: 0.05,
+      comparison: result,
+      candidate: null,
+      dispersion: null,
+      warnings: [],
+    });
+  }
+
+  it("counts regressed rows per dimension, even when the mean of that dimension improved", () => {
+    const latency = dimension({ id: "latency", kind: "latency", scoreConfigName: null, delta: -1250, assignment: "improved" });
+    const rowWith = (assignment: "regressed" | "improved" | "unchanged") => ({
+      logicalId: assignment,
+      bucket: assignment,
+      dimensions: [{ ...latency, assignment }],
+    });
+    const markdown = render(
+      comparison({
+        counts: { ...counts, regressed: 3, improved: 1, unchanged: 6 },
+        dimensions: [latency],
+        rows: [rowWith("regressed"), rowWith("regressed"), rowWith("regressed"), rowWith("improved"), rowWith("unchanged")],
+      }),
+      "regressed",
+    );
+    expect(markdown).toContain("| latency (ms) | 0.8 | 0.8 | −1250 | ❌ 3 regressed · ✅ 1 improved |");
+  });
+
+  it("prints a delta that rounds to zero without a sign", () => {
+    const markdown = render(comparison({ dimensions: [dimension({ delta: -0.0001 })] }));
+    expect(markdown).toContain("| 0.8 | 0.8 | 0 | = |");
   });
 });

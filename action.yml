@@ -21,7 +21,7 @@ inputs:
     description: '"run" (default) creates the experiment and waits for the platform to execute it. "report" takes over an existing experiment (experiment_id) created by a preceding step, for example pytest with the Python SDK.'
     required: false
   name:
-    description: 'Experiment name (run mode). Default: gh-pr<N>-<sha7> on pull requests, gh-<ref>-<sha7> otherwise.'
+    description: 'Experiment name (run mode). Default: gh-pr<N>-<sha7> on pull requests (sha7 of the PR head), gh-<ref>-<sha7> otherwise.'
     required: false
   task_ref:
     description: 'Remote task, pinned: "name@vN" or "name@N" (run mode). Exactly one of task_ref and inline_config.'
@@ -54,10 +54,10 @@ inputs:
     description: '"regressed" (default) fails the step on a regression. "none" only reports. Errors always fail the step.'
     required: false
   threshold:
-    description: 'Delta threshold for numeric dimensions. Default: 0.05.'
+    description: 'Smallest change of a row that counts, as a fraction (of the score range, of the baseline value for latency and cost, or of the healthy fraction). Default: 0.05.'
     required: false
   dimensions:
-    description: 'Comma list of dimensions that gate: score config names, "latency_ms", "cost". Default: every score dimension with a health policy. Latency and cost gate only when named.'
+    description: 'Comma list of dimensions that gate: score config names, "latency_ms", "cost". Default: every score dimension with a health policy. Latency and cost gate only when named. In run mode an unknown name fails before the experiment is created.'
     required: false
   allow_inconclusive:
     description: 'Accept rows the comparison could not judge. Default: false.'
@@ -69,7 +69,7 @@ inputs:
     description: 'Post a sticky PR comment on pull_request events. Default: true.'
     required: false
   comment_key:
-    description: 'Identifies the sticky comment. Default: <dataset>:<job>:<step>. Set it when one job runs the Action more than once on the same dataset.'
+    description: 'Identifies the sticky comment. Default: <dataset>:<job>:<step>, or report:<job>:<step> in report mode. Set it when one job runs the Action more than once on the same dataset.'
     required: false
   github_token:
     description: Token for the PR comment. Needs pull-requests write permission.

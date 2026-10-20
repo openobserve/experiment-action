@@ -21,6 +21,10 @@ export interface CiContext {
   action: string;
   workflow: string;
   eventName: string;
+  /**
+   * Commit under test as people know it: the PR head on pull requests, where
+   * `GITHUB_SHA` is a temporary merge commit that appears in no branch.
+   */
   sha: string;
   /** Branch or tag name of the run (`GITHUB_REF_NAME`). */
   refName: string;
@@ -29,7 +33,13 @@ export interface CiContext {
   prNumber: number | null;
 }
 
-export function readCiContext(env: NodeJS.ProcessEnv, prNumber: number | null): CiContext {
+export interface PullRequestRef {
+  number: number;
+  /** `pull_request.head.sha` of the event payload. */
+  headSha: string | null;
+}
+
+export function readCiContext(env: NodeJS.ProcessEnv, pullRequest: PullRequestRef | null): CiContext {
   return {
     repositoryId: env.GITHUB_REPOSITORY_ID ?? "",
     repository: env.GITHUB_REPOSITORY ?? "",
@@ -38,10 +48,10 @@ export function readCiContext(env: NodeJS.ProcessEnv, prNumber: number | null): 
     action: env.GITHUB_ACTION ?? "",
     workflow: env.GITHUB_WORKFLOW ?? "",
     eventName: env.GITHUB_EVENT_NAME ?? "",
-    sha: env.GITHUB_SHA ?? "",
+    sha: pullRequest?.headSha || (env.GITHUB_SHA ?? ""),
     refName: env.GITHUB_REF_NAME ?? "",
     headRef: env.GITHUB_HEAD_REF || null,
-    prNumber,
+    prNumber: pullRequest?.number ?? null,
   };
 }
 

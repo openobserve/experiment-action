@@ -24637,7 +24637,7 @@ function formatRef(ref) {
 }
 
 // src/ci.ts
-function readCiContext(env, prNumber) {
+function readCiContext(env, pullRequest2) {
   return {
     repositoryId: env.GITHUB_REPOSITORY_ID ?? "",
     repository: env.GITHUB_REPOSITORY ?? "",
@@ -24646,10 +24646,10 @@ function readCiContext(env, prNumber) {
     action: env.GITHUB_ACTION ?? "",
     workflow: env.GITHUB_WORKFLOW ?? "",
     eventName: env.GITHUB_EVENT_NAME ?? "",
-    sha: env.GITHUB_SHA ?? "",
+    sha: pullRequest2?.headSha || (env.GITHUB_SHA ?? ""),
     refName: env.GITHUB_REF_NAME ?? "",
     headRef: env.GITHUB_HEAD_REF || null,
-    prNumber
+    prNumber: pullRequest2?.number ?? null
   };
 }
 function defaultExperimentName(ci) {
@@ -24749,9 +24749,15 @@ function decideFromComparison(comparison, allowInconclusive) {
   }
   const counts = comparison.counts;
   if (counts.commonRows === 0 || counts.inconclusive === counts.commonRows) {
+    const oneSided = comparison.dimensions.filter(
+      (dimension) => dimension.gating && (dimension.assignment === "baseline_only" || dimension.assignment === "candidate_only")
+    ).map(
+      (dimension) => `${dimensionLabel(dimension)} (${dimension.assignment === "baseline_only" ? "baseline only" : "candidate only"})`
+    );
+    const cause = oneSided.length > 0 ? ` These gating dimensions have values on one side only: ${oneSided.join(", ")}. Use the scorers and scorer versions of the baseline.` : "";
     return errorVerdict(
       "nothing_compared",
-      `No row was compared: ${counts.commonRows} common rows, ${counts.inconclusive} inconclusive.`
+      `No row was compared: ${counts.commonRows} common rows, ${counts.inconclusive} inconclusive.${cause}`
     );
   }
   if (counts.regressed > 0) {
@@ -24771,6 +24777,26 @@ function decideFromComparison(comparison, allowInconclusive) {
 }
 
 // src/dimensions.ts
+function checkDimensionNames(names, scorerIds, scorers, scoreConfigs) {
+  const configNames = Object.fromEntries(
+    scoreConfigs.map((config2) => [config2.entityId, config2.name])
+  );
+  const scoreNames = [];
+  for (const id of scorerIds) {
+    const configId = scorers.find((scorer) => scorer.entityId === id)?.producesScoreConfigId;
+    const name = configId ? configNames[configId] : void 0;
+    if (name === void 0) return;
+    if (!scoreNames.includes(name)) scoreNames.push(name);
+  }
+  const available = [...scoreNames, "latency_ms", "cost"];
+  const unknown2 = names.filter((name) => !available.includes(name));
+  if (unknown2.length > 0) {
+    throw new ActionError(
+      "setup_failed",
+      `Unknown dimension(s): ${unknown2.join(", ")}. Available: ${available.join(", ")}.`
+    );
+  }
+}
 function allDimensions(comparison) {
   const byId = /* @__PURE__ */ new Map();
   for (const dimension of comparison.dimensions) byId.set(dimension.id, dimension);
@@ -24855,7 +24881,7 @@ function renderReport(context3) {
     lines.push(`> ${verdict.message}`, "");
   }
   if (comparison) {
-    if (comparison.dimensions.length > 0) lines.push(...dimensionTable(comparison.dimensions), "");
+    if (comparison.dimensions.length > 0) lines.push(...dimensionTable(comparison), "");
     const topLevel = new Set(comparison.dimensions.map((dimension) => dimension.id));
     const descriptive = allDimensions(comparison).filter(
       (dimension) => !topLevel.has(dimension.id) && !dimension.canAffectOutcome
@@ -24895,12 +24921,21 @@ function renderReport(context3) {
   return `${lines.join("\n").trimEnd()}
 `;
 }
-function dimensionTable(dimensions) {
-  const rows = dimensions.map((dimension) => {
+function dimensionTable(comparison) {
+  const rowCounts = {};
+  for (const row of comparison.rows) {
+    for (const dimension of row.dimensions) {
+      if (!dimension.gating) continue;
+      const counts = rowCounts[dimension.id] ??= { regressed: 0, improved: 0 };
+      if (dimension.assignment === "regressed") counts.regressed += 1;
+      if (dimension.assignment === "improved") counts.improved += 1;
+    }
+  }
+  const rows = comparison.dimensions.map((dimension) => {
     const name = dimension.kind === "cost" ? "cost ($)" : dimension.kind === "latency" ? "latency (ms)" : dimensionLabel(dimension);
-    return `| ${cell(name)} | ${value(dimension, "baseline")} | ${value(dimension, "candidate")} | ${signed(dimension.delta)} | ${status(dimension)} |`;
+    return `| ${cell(name)} | ${value(dimension, "baseline")} | ${value(dimension, "candidate")} | ${signed(dimension.delta)} | ${status(dimension, rowCounts[dimension.id])} |`;
   });
-  return ["| Dimension | Baseline | Candidate | \u0394 | |", "|---|---|---|---|---|", ...rows];
+  return ["| Dimension | Baseline | Candidate | \u0394 mean | Rows |", "|---|---|---|---|---|", ...rows];
 }
 function topRegressions(comparison) {
   const worst = comparison.rows.filter((row) => row.bucket === "regressed").map((row) => {
@@ -24925,22 +24960,21 @@ function topRegressions(comparison) {
     ""
   ];
 }
-function status(dimension) {
+function status(dimension, rows) {
   if (!dimension.gating) return dimension.canAffectOutcome ? "not selected" : "not gated";
   switch (dimension.assignment) {
-    case "regressed":
-      return "\u274C";
-    case "improved":
-      return "\u2705";
-    case "unchanged":
-      return "=";
     case "baseline_only":
       return "baseline only";
     case "candidate_only":
       return "candidate only";
-    default:
+    case "descriptive":
+    case "unavailable":
       return "n/a";
   }
+  const parts = [];
+  if (rows && rows.regressed > 0) parts.push(`\u274C ${rows.regressed} regressed`);
+  if (rows && rows.improved > 0) parts.push(`\u2705 ${rows.improved} improved`);
+  return parts.length > 0 ? parts.join(" \xB7 ") : "=";
 }
 function value(dimension, side) {
   const label = side === "baseline" ? dimension.baselineLabel : dimension.candidateLabel;
@@ -24954,7 +24988,8 @@ function number(input2) {
 function signed(input2) {
   if (input2 === null || input2 === void 0) return "\u2014";
   const text = number(Math.abs(input2));
-  return input2 > 0 ? `+${text}` : input2 < 0 ? `\u2212${text}` : text;
+  if (text === "0") return text;
+  return input2 > 0 ? `+${text}` : `\u2212${text}`;
 }
 function cell(text) {
   return text.replace(/[\r\n]+/g, " ").replace(/\|/g, "\\|").slice(0, 60);
@@ -44719,9 +44754,13 @@ var ScorerSchema = external_exports.object({
   /** Stable id. This is what `scorers[].id` takes; `id` is a version row id. */
   entityId: external_exports.string(),
   name: external_exports.string(),
-  version: external_exports.number()
+  version: external_exports.number(),
+  /** Entity id of the score config that the scorer writes. */
+  producesScoreConfigId: external_exports.string().nullish()
 });
 var ScorerListSchema = listOf(ScorerSchema);
+var ScoreConfigSchema = external_exports.object({ entityId: external_exports.string(), name: external_exports.string() });
+var ScoreConfigListSchema = listOf(ScoreConfigSchema);
 var ProviderListSchema = listOf(external_exports.object({ id: external_exports.string(), name: external_exports.string() }));
 var ResolvedPromptSchema = external_exports.object({
   prompt: external_exports.object({ entityId: external_exports.string(), name: external_exports.string() }),
@@ -44842,6 +44881,7 @@ function httpApi(client) {
   return {
     listDatasets: async () => (await client.request(DatasetListSchema, "GET", "/datasets")).list,
     listScorers: async () => (await client.request(ScorerListSchema, "GET", "/scorers")).list,
+    listScoreConfigs: async () => (await client.request(ScoreConfigListSchema, "GET", "/score_configs")).list,
     listProviders: async () => (await client.request(ProviderListSchema, "GET", "/providers")).list,
     resolvePrompt: (name, version2) => client.request(ResolvedPromptSchema, "GET", "/prompts/resolve", {
       query: { name, version: String(version2) }
@@ -45386,6 +45426,20 @@ function progressLine(candidate, baseline) {
 }
 
 // src/run.ts
+var OUTPUT_NAMES = [
+  "experiment_id",
+  "experiment_url",
+  "compare_url",
+  "baseline_id",
+  "verdict",
+  "error_reason",
+  "regressed",
+  "improved",
+  "unchanged",
+  "inconclusive",
+  "new",
+  "missing"
+];
 async function runAction(deps) {
   const { io, ci } = deps;
   let inputs;
@@ -45394,8 +45448,21 @@ async function runAction(deps) {
   } catch (error63) {
     if (error63 instanceof InputError) {
       const verdict2 = errorVerdict("invalid_inputs", error63.message);
-      io.setOutput("verdict", verdict2.verdict);
-      io.setOutput("error_reason", "invalid_inputs");
+      const markdown = renderReport({
+        commentKey: `${ci.job}:${ci.action}`,
+        experimentName: "experiment gate",
+        verdict: verdict2,
+        experimentUrl: null,
+        compareUrl: null,
+        baseline: null,
+        dataset: null,
+        threshold: 0,
+        comparison: null,
+        candidate: null,
+        dispersion: null,
+        warnings: []
+      });
+      await publish(io, markdown, { verdict: verdict2.verdict, error_reason: "invalid_inputs" });
       io.setFailed(error63.message);
       return verdict2;
     }
@@ -45491,6 +45558,15 @@ async function createCandidate(inputs, api, state, deps) {
   const scorers = await resolveScorers(api, inputs.scorers, state.baseline);
   state.warnings.push(...scorers.warnings);
   for (const warning2 of scorers.warnings) io.warning(warning2);
+  if (inputs.dimensions.length > 0) {
+    const [available, scoreConfigs] = await Promise.all([api.listScorers(), api.listScoreConfigs()]);
+    checkDimensionNames(
+      inputs.dimensions,
+      scorers.scorers.map((scorer) => scorer.id),
+      available,
+      scoreConfigs
+    );
+  }
   const task = await resolveTask(api, inputs.task);
   const key = idempotencyKey(ci, inputs, state.experimentName);
   let experiment;
@@ -45508,11 +45584,13 @@ async function createCandidate(inputs, api, state, deps) {
       confirmCostEstimate: inputs.confirmCostEstimate
     });
     experiment = created.experiment;
-    const estimate = created.preview.costEstimate;
-    const cost = estimate && estimate.estimatedCost !== null && estimate.estimatedCost !== void 0 ? ` \xB7 estimated cost ${estimate.currency} ${estimate.estimatedCost.toFixed(2)}${estimate.incomplete ? "+" : ""}` : "";
-    io.info(
-      `${created.created ? "Created" : "Reusing"} experiment ${experiment.name} (${experiment.id})${cost}`
-    );
+    if (created.created) {
+      const estimate = created.preview.costEstimate;
+      const cost = estimate && estimate.estimatedCost !== null && estimate.estimatedCost !== void 0 ? ` \xB7 estimated cost ${estimate.currency} ${estimate.estimatedCost.toFixed(2)}${estimate.incomplete ? "+" : ""}` : "";
+      io.info(`Created experiment ${experiment.name} (${experiment.id})${cost}`);
+    } else {
+      io.info(`Reusing experiment ${experiment.name} (${experiment.id})`);
+    }
   } catch (error63) {
     if (!(error63 instanceof O2HttpError)) throw error63;
     if (error63.status === 409) {
@@ -45604,7 +45682,7 @@ async function report(inputs, state, verdict, deps) {
     warnings: state.warnings
   });
   const counts = state.comparison?.counts;
-  const outputs = {
+  await publish(io, markdown, {
     experiment_id: state.experimentId ?? "",
     experiment_url: experimentUrl ?? "",
     compare_url: compareUrl ?? "",
@@ -45617,13 +45695,7 @@ async function report(inputs, state, verdict, deps) {
     inconclusive: counts ? String(counts.inconclusive) : "",
     new: counts ? String(counts.new) : "",
     missing: counts ? String(counts.missing) : ""
-  };
-  for (const [name, value2] of Object.entries(outputs)) io.setOutput(name, value2);
-  try {
-    await io.writeSummary(markdown);
-  } catch (error63) {
-    io.warning(`Could not write the job summary: ${error63 instanceof Error ? error63.message : String(error63)}`);
-  }
+  });
   if (inputs.comment && io.postComment) {
     try {
       const outcome = await io.postComment(commentKey, markdown, inputs.githubToken);
@@ -45635,9 +45707,18 @@ async function report(inputs, state, verdict, deps) {
     }
   }
 }
+async function publish(io, markdown, values) {
+  for (const name of OUTPUT_NAMES) io.setOutput(name, values[name] ?? "");
+  try {
+    await io.writeSummary(markdown);
+  } catch (error63) {
+    io.warning(`Could not write the job summary: ${error63 instanceof Error ? error63.message : String(error63)}`);
+  }
+}
 
 // src/main.ts
 var pullRequest = context2.payload.pull_request;
+var headSha = pullRequest?.head?.sha;
 var workspace = process.env.GITHUB_WORKSPACE ?? process.cwd();
 try {
   await runAction({
@@ -45649,7 +45730,10 @@ try {
       },
       isForkPullRequest: pullRequest !== void 0 && pullRequest.head?.repo?.full_name !== pullRequest.base?.repo?.full_name
     },
-    ci: readCiContext(process.env, pullRequest?.number ?? null),
+    ci: readCiContext(
+      process.env,
+      pullRequest ? { number: pullRequest.number, headSha: typeof headSha === "string" ? headSha : null } : null
+    ),
     createApi: (inputs) => httpApi(
       new O2Client({
         url: inputs.url,

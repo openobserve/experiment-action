@@ -5,7 +5,7 @@
  */
 
 import { defaultExperimentName, experimentMetadata, idempotencyKey, type CiContext } from "./ci.js";
-import { selectGatingDimensions } from "./dimensions.js";
+import { checkDimensionNames, selectGatingDimensions } from "./dimensions.js";
 import { InputError, parseInputs, type Inputs, type InputSource, type RunInputs } from "./inputs.js";
 import type { O2Api } from "./o2/api.js";
 import { O2HttpError } from "./o2/client.js";
@@ -54,6 +54,22 @@ interface RunState {
   warnings: string[];
 }
 
+const OUTPUT_NAMES = [
+  "experiment_id",
+  "experiment_url",
+  "compare_url",
+  "baseline_id",
+  "verdict",
+  "error_reason",
+  "regressed",
+  "improved",
+  "unchanged",
+  "inconclusive",
+  "new",
+  "missing",
+] as const;
+type OutputName = (typeof OUTPUT_NAMES)[number];
+
 export async function runAction(deps: RunDependencies): Promise<Verdict> {
   const { io, ci } = deps;
 
@@ -62,9 +78,24 @@ export async function runAction(deps: RunDependencies): Promise<Verdict> {
     inputs = parseInputs(deps.source);
   } catch (error) {
     if (error instanceof InputError) {
+      // Inputs that do not parse give no dataset, comment key, or token, so
+      // there is no PR comment. The summary and the outputs still tell why.
       const verdict = errorVerdict("invalid_inputs", error.message);
-      io.setOutput("verdict", verdict.verdict);
-      io.setOutput("error_reason", "invalid_inputs");
+      const markdown = renderReport({
+        commentKey: `${ci.job}:${ci.action}`,
+        experimentName: "experiment gate",
+        verdict,
+        experimentUrl: null,
+        compareUrl: null,
+        baseline: null,
+        dataset: null,
+        threshold: 0,
+        comparison: null,
+        candidate: null,
+        dispersion: null,
+        warnings: [],
+      });
+      await publish(io, markdown, { verdict: verdict.verdict, error_reason: "invalid_inputs" });
       io.setFailed(error.message);
       return verdict;
     }
@@ -174,6 +205,15 @@ async function createCandidate(
   const scorers = await resolveScorers(api, inputs.scorers, state.baseline);
   state.warnings.push(...scorers.warnings);
   for (const warning of scorers.warnings) io.warning(warning);
+  if (inputs.dimensions.length > 0) {
+    const [available, scoreConfigs] = await Promise.all([api.listScorers(), api.listScoreConfigs()]);
+    checkDimensionNames(
+      inputs.dimensions,
+      scorers.scorers.map((scorer) => scorer.id),
+      available,
+      scoreConfigs,
+    );
+  }
   const task = await resolveTask(api, inputs.task);
 
   const key = idempotencyKey(ci, inputs, state.experimentName);
@@ -192,14 +232,17 @@ async function createCandidate(
       confirmCostEstimate: inputs.confirmCostEstimate,
     });
     experiment = created.experiment;
-    const estimate = created.preview.costEstimate;
-    const cost =
-      estimate && estimate.estimatedCost !== null && estimate.estimatedCost !== undefined
-        ? ` · estimated cost ${estimate.currency} ${estimate.estimatedCost.toFixed(2)}${estimate.incomplete ? "+" : ""}`
-        : "";
-    io.info(
-      `${created.created ? "Created" : "Reusing"} experiment ${experiment.name} (${experiment.id})${cost}`,
-    );
+    if (created.created) {
+      const estimate = created.preview.costEstimate;
+      const cost =
+        estimate && estimate.estimatedCost !== null && estimate.estimatedCost !== undefined
+          ? ` · estimated cost ${estimate.currency} ${estimate.estimatedCost.toFixed(2)}${estimate.incomplete ? "+" : ""}`
+          : "";
+      io.info(`Created experiment ${experiment.name} (${experiment.id})${cost}`);
+    } else {
+      // A re-run of the job: the server returns the first experiment, no new cost.
+      io.info(`Reusing experiment ${experiment.name} (${experiment.id})`);
+    }
   } catch (error) {
     if (!(error instanceof O2HttpError)) throw error;
     if (error.status === 409) {
@@ -317,7 +360,7 @@ async function report(inputs: Inputs, state: RunState, verdict: Verdict, deps: R
   });
 
   const counts = state.comparison?.counts;
-  const outputs: Record<string, string> = {
+  await publish(io, markdown, {
     experiment_id: state.experimentId ?? "",
     experiment_url: experimentUrl ?? "",
     compare_url: compareUrl ?? "",
@@ -330,14 +373,7 @@ async function report(inputs: Inputs, state: RunState, verdict: Verdict, deps: R
     inconclusive: counts ? String(counts.inconclusive) : "",
     new: counts ? String(counts.new) : "",
     missing: counts ? String(counts.missing) : "",
-  };
-  for (const [name, value] of Object.entries(outputs)) io.setOutput(name, value);
-
-  try {
-    await io.writeSummary(markdown);
-  } catch (error) {
-    io.warning(`Could not write the job summary: ${error instanceof Error ? error.message : String(error)}`);
-  }
+  });
 
   if (inputs.comment && io.postComment) {
     try {
@@ -349,5 +385,19 @@ async function report(inputs: Inputs, state: RunState, verdict: Verdict, deps: R
         `Could not post the PR comment (needs permissions: pull-requests: write): ${error instanceof Error ? error.message : String(error)}`,
       );
     }
+  }
+}
+
+/** Sets every output (unknown ones to "") and writes the job summary. */
+async function publish(
+  io: ActionIO,
+  markdown: string,
+  values: Partial<Record<OutputName, string>>,
+): Promise<void> {
+  for (const name of OUTPUT_NAMES) io.setOutput(name, values[name] ?? "");
+  try {
+    await io.writeSummary(markdown);
+  } catch (error) {
+    io.warning(`Could not write the job summary: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
