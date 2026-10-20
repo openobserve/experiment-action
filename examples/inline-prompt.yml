@@ -1,0 +1,30 @@
+# Gate a prompt that lives in the repository (.o2/experiment.json).
+# The experiment runs only when the prompt file changes: a gate that runs on
+# unrelated changes measures nothing about the PR.
+name: Prompt regression gate
+
+on:
+  pull_request:
+    paths:
+      - ".o2/experiment.json"
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    concurrency:
+      group: eval-${{ github.event.number }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: openobserve/o2-ai/packages/experiment-action@main
+        with:
+          url: ${{ vars.O2_URL }}
+          org: ${{ vars.O2_ORG }}
+          token: ${{ secrets.O2_TOKEN }}
+          inline_config: .o2/experiment.json
+          dataset: rag-qa-golden
+          filter: '{"tags": ["ci-smoke"]}'

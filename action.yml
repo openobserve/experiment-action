@@ -1,0 +1,107 @@
+name: OpenObserve Experiment
+description: Run an OpenObserve LLM experiment, compare it with the dataset baseline, comment on the PR, and fail on regressions.
+author: OpenObserve
+branding:
+  icon: check-circle
+  color: blue
+
+# Defaults live in the code, not here: GitHub fills declared defaults into
+# every run, and report mode must be able to tell "not set" from "set".
+inputs:
+  url:
+    description: OpenObserve base URL, including any ZO_BASE_URI prefix.
+    required: true
+  org:
+    description: Organization identifier.
+    required: true
+  token:
+    description: 'Full Authorization header value of a service account, "Basic <base64(email:token)>". Same value as OPENOBSERVE_AUTH_TOKEN of the Python SDK. Store it in a secret.'
+    required: true
+  mode:
+    description: '"run" (default) creates the experiment and waits for the platform to execute it. "report" takes over an existing experiment (experiment_id) created by a preceding step, for example pytest with the Python SDK.'
+    required: false
+  name:
+    description: 'Experiment name (run mode). Default: gh-pr<N>-<sha7> on pull requests, gh-<ref>-<sha7> otherwise.'
+    required: false
+  task_ref:
+    description: 'Remote task, pinned: "name@vN" or "name@N" (run mode). Exactly one of task_ref and inline_config.'
+    required: false
+  inline_config:
+    description: 'Path to a JSON file with the experiment task object (run mode). "provider" and "ref" are resolved by name.'
+    required: false
+  experiment_id:
+    description: Experiment to report on (report mode only).
+    required: false
+  dataset:
+    description: 'Dataset "name" (current snapshot) or "name@vN" (run mode).'
+    required: false
+  filter:
+    description: 'Dataset filter JSON, for example {"tags": ["ci-smoke"]} (run mode).'
+    required: false
+  scorers:
+    description: 'Comma list of pinned scorers, "name@N" (run mode). Default: the scorers of the baseline.'
+    required: false
+  trial_count:
+    description: 'Trials per dataset row (run mode). Default: 1.'
+    required: false
+  confirm_cost_estimate:
+    description: 'Accept a cost estimate above the server limit of $10 (run mode). Default: true. Set "false" to keep that guard.'
+    required: false
+  baseline:
+    description: '"pinned" (default): the pinned baseline of the dataset. Otherwise an experiment id.'
+    required: false
+  fail_on:
+    description: '"regressed" (default) fails the step on a regression. "none" only reports. Errors always fail the step.'
+    required: false
+  threshold:
+    description: 'Delta threshold for numeric dimensions. Default: 0.05.'
+    required: false
+  dimensions:
+    description: 'Comma list of dimensions that gate: score config names, "latency_ms", "cost". Default: every score dimension with a health policy. Latency and cost gate only when named.'
+    required: false
+  allow_inconclusive:
+    description: 'Accept rows the comparison could not judge. Default: false.'
+    required: false
+  timeout_minutes:
+    description: 'Budget for execution, scoring and comparison. Default: 30.'
+    required: false
+  comment:
+    description: 'Post a sticky PR comment on pull_request events. Default: true.'
+    required: false
+  comment_key:
+    description: 'Identifies the sticky comment. Default: <dataset>:<job>:<step>. Set it when one job runs the Action more than once on the same dataset.'
+    required: false
+  github_token:
+    description: Token for the PR comment. Needs pull-requests write permission.
+    required: false
+    default: ${{ github.token }}
+
+outputs:
+  experiment_id:
+    description: Id of the experiment.
+  experiment_url:
+    description: Experiment page in OpenObserve.
+  compare_url:
+    description: Comparison page in OpenObserve. Empty when the run ended before the comparison.
+  baseline_id:
+    description: Id of the baseline experiment.
+  verdict:
+    description: pass, regressed, or error.
+  error_reason:
+    description: Machine-readable reason when verdict is error.
+  regressed:
+    description: Rows that regressed.
+  improved:
+    description: Rows that improved.
+  unchanged:
+    description: Rows that did not change.
+  inconclusive:
+    description: Rows the comparison could not judge.
+  new:
+    description: Rows only in the experiment.
+  missing:
+    description: Rows only in the baseline.
+
+runs:
+  using: node24
+  main: dist/index.js

@@ -1,0 +1,26 @@
+# The full dataset every night. PR gates run the tagged subset; this run
+# catches what the subset misses. Results go to the job summary.
+name: Nightly full evaluation
+
+on:
+  schedule:
+    - cron: "0 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: openobserve/o2-ai/packages/experiment-action@main
+        with:
+          url: ${{ vars.O2_URL }}
+          org: ${{ vars.O2_ORG }}
+          token: ${{ secrets.O2_TOKEN }}
+          inline_config: .o2/experiment.json
+          dataset: rag-qa-golden
+          comment: "false"
+          timeout_minutes: "120"

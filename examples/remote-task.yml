@@ -1,0 +1,25 @@
+# Gate a new version of a registered remote task. The PR changes the version
+# in task_ref, so the gate runs only when this workflow file changes.
+name: Remote task regression gate
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/remote-task.yml"
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: openobserve/o2-ai/packages/experiment-action@main
+        with:
+          url: ${{ vars.O2_URL }}
+          org: ${{ vars.O2_ORG }}
+          token: ${{ secrets.O2_TOKEN }}
+          task_ref: rag-staging@v4
+          dataset: rag-qa-golden
+          timeout_minutes: "45"

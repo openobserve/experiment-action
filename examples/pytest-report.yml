@@ -1,0 +1,58 @@
+# The application code is the task. pytest runs it with the Python SDK
+# (openobserve-python-sdk), then the Action waits for scoring, compares,
+# comments, and gates.
+#
+# tests/eval_test.py:
+#
+#   import os
+#   from openobserve import experiment
+#
+#   def test_rag():
+#       run_id = os.environ["GITHUB_RUN_ID"]
+#       result = experiment.run(
+#           "pr-rag-check",
+#           dataset="rag-qa-golden",
+#           task=my_pipeline,
+#           scorers=["answer_correctness@2"],
+#           # Without a key the SDK picks a random one, and "Re-run jobs"
+#           # creates a second experiment.
+#           idempotency_key=f"gha:{run_id}:rag",
+#       )
+#       with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+#           out.write(f"experiment_id={result.experiment_id}\n")
+name: Pipeline regression gate
+
+on:
+  pull_request:
+    paths:
+      - "src/**"
+      - "tests/eval_test.py"
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  eval:
+    runs-on: ubuntu-latest
+    env:
+      OPENOBSERVE_URL: ${{ vars.O2_URL }}
+      OPENOBSERVE_ORG: ${{ vars.O2_ORG }}
+      OPENOBSERVE_AUTH_TOKEN: ${{ secrets.O2_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - run: pip install openobserve-python-sdk pytest
+      - id: eval
+        run: pytest tests/eval_test.py
+      # Comment and gate even when pytest failed after creating the experiment.
+      - if: always() && steps.eval.outputs.experiment_id != ''
+        uses: openobserve/o2-ai/packages/experiment-action@main
+        with:
+          url: ${{ vars.O2_URL }}
+          org: ${{ vars.O2_ORG }}
+          token: ${{ secrets.O2_TOKEN }}
+          mode: report
+          experiment_id: ${{ steps.eval.outputs.experiment_id }}

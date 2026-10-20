@@ -1,0 +1,27 @@
+{
+  "name": "@openobserve/experiment-action",
+  "version": "0.1.0",
+  "private": true,
+  "description": "GitHub Action: run an OpenObserve LLM experiment, compare it with the baseline, comment on the PR, and gate on regressions",
+  "type": "module",
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "esbuild src/main.ts --bundle --platform=node --target=node20 --format=esm --outfile=dist/index.js --legal-comments=none --banner:js=\"import { createRequire as __createRequire } from 'node:module'; const require = __createRequire(import.meta.url);\"",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@actions/core": "^3.0.1",
+    "@actions/github": "^9.1.1",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^24.19.2",
+    "esbuild": "^0.28.2",
+    "typescript": "^5.9.3",
+    "vitest": "^3.2.7"
+  }
+}
