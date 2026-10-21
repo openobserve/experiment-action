@@ -15,7 +15,7 @@ jobs:
   eval:
     runs-on: ubuntu-latest
     steps:
-      - uses: openobserve/o2-ai/packages/experiment-action@main
+      - uses: openobserve/experiment-action@v1
         with:
           url: ${{ vars.O2_URL }}
           org: ${{ vars.O2_ORG }}

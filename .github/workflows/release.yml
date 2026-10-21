@@ -1,0 +1,50 @@
+name: Release
+
+# Draft the release in the GitHub UI with a new vX.Y.Z tag; the UI is where
+# "Publish this Action to the GitHub Marketplace" is ticked. Publishing it
+# runs this workflow, which moves the vX major tag to the release.
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: write
+
+jobs:
+  major-tag:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Check the tag
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          if ! [[ "$TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::Release tag $TAG is not vX.Y.Z."
+            exit 1
+          fi
+
+      - run: npm ci
+
+      - name: Check that dist/ matches the sources
+        run: |
+          npm run build
+          git diff --exit-code -- dist/ || {
+            echo "::error::dist/index.js of $GITHUB_REF is stale."
+            exit 1
+          }
+
+      - name: Move the major tag
+        if: ${{ !github.event.release.prerelease }}
+        env:
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          major="${TAG%%.*}"
+          git tag -f "$major" "$GITHUB_SHA"
+          git push -f origin "refs/tags/$major"

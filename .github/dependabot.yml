@@ -1,0 +1,15 @@
+version: 2
+updates:
+  # A dependency update needs a rebuilt dist/index.js before CI passes.
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      npm:
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly

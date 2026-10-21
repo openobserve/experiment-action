@@ -2,7 +2,30 @@
 
 A GitHub Action that gates a pull request on an OpenObserve LLM experiment. It runs an experiment on a dataset, compares the experiment with the baseline of the dataset, posts a sticky PR comment, and fails the step when a row regressed.
 
-Design: `designs/llm-obervability/v2/LLM_Observability_Phase3_CI_GitHub_Action_Implementation_Design_v1_EN.md` (designs repository).
+## Usage
+
+```yaml
+permissions:
+  contents: read
+  pull-requests: write
+
+steps:
+  - uses: openobserve/experiment-action@v1
+    with:
+      url: ${{ vars.O2_URL }}
+      org: ${{ vars.O2_ORG }}
+      token: ${{ secrets.O2_TOKEN }}
+      task_ref: rag-staging@v4
+      dataset: rag-qa-golden
+```
+
+Pick the setup that matches your PR below, then follow [Before the first run](#before-the-first-run).
+
+## Requirements
+
+- OpenObserve Enterprise or Cloud v1.1.0 or later, with LLM experiments.
+- `mode: report` in an org where no experiment ran before also needs the fix that creates the experiment stream before SDK ingest. Until your server has it, run one experiment in the org first.
+- A GitHub runner that supports `node24` actions. GitHub-hosted runners do.
 
 ## Which setup to use
 
@@ -104,7 +127,10 @@ The PR comment and the job summary contain ids, names, and scores only. They nev
 
 - Pull requests from forks do not get secrets, so the Action cannot run on them.
 - Orgs that refuse static tokens (`allow_static_token=false`) are not supported.
-- This repository is private. Workflows in other repositories can use the Action only after the repository grants access under **Settings → Actions → General → Access**.
+
+## Versions
+
+Releases follow semantic versioning. `v1` points to the latest `v1.x.y` release. Pin `@v1` to get fixes, or pin a full commit SHA to control every update.
 
 ## Development
 
@@ -114,3 +140,9 @@ npm run typecheck
 npm test
 npm run build   # commit dist/index.js: the runner executes the bundle
 ```
+
+To release, draft a GitHub release with a new `vX.Y.Z` tag and publish it. The release workflow checks that `dist/` matches the sources and moves the `vX` tag to the release.
+
+## License
+
+[Apache-2.0](LICENSE)

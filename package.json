@@ -1,6 +1,6 @@
 {
   "name": "@openobserve/experiment-action",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "description": "GitHub Action: run an OpenObserve LLM experiment, compare it with the baseline, comment on the PR, and gate on regressions",
   "type": "module",
@@ -23,5 +23,10 @@
     "esbuild": "^0.28.2",
     "typescript": "^5.9.3",
     "vitest": "^3.2.7"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/openobserve/experiment-action.git"
+  },
+  "homepage": "https://github.com/openobserve/experiment-action"
 }

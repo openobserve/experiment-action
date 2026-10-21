@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+
+      - run: npm ci
+
+      - run: npm run typecheck
+
+      - run: npm test
+
+      # The runner executes the committed bundle, not the sources.
+      - name: Check that dist/ matches the sources
+        run: |
+          npm run build
+          git diff --exit-code -- dist/ || {
+            echo "::error::dist/index.js is stale. Run 'npm run build' and commit the result."
+            exit 1
+          }
+
+  # Runs the committed bundle on the runner. Report mode without
+  # experiment_id fails input validation before any request, so no
+  # OpenObserve instance or secret is needed.
+  smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: action
+        continue-on-error: true
+        uses: ./
+        with:
+          url: https://openobserve.invalid
+          org: default
+          token: Basic invalid
+          mode: report
+          comment: "false"
+
+      - name: Check the verdict
+        env:
+          OUTCOME: ${{ steps.action.outcome }}
+          VERDICT: ${{ steps.action.outputs.verdict }}
+          REASON: ${{ steps.action.outputs.error_reason }}
+        run: |
+          echo "outcome=$OUTCOME verdict=$VERDICT error_reason=$REASON"
+          test "$OUTCOME" = failure
+          test "$VERDICT" = error
+          test "$REASON" = invalid_inputs

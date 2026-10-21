@@ -49,7 +49,7 @@ jobs:
         run: pytest tests/eval_test.py
       # Comment and gate even when pytest failed after creating the experiment.
       - if: always() && steps.eval.outputs.experiment_id != ''
-        uses: openobserve/o2-ai/packages/experiment-action@main
+        uses: openobserve/experiment-action@v1
         with:
           url: ${{ vars.O2_URL }}
           org: ${{ vars.O2_ORG }}
